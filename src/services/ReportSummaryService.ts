@@ -16,7 +16,7 @@ export class ReportSummaryService {
     intent: "report.booking_summary" | "report.sales_summary" | "report.practitioner_summary";
     session: GTSessionContext;
   }): Promise<AnalyzeAssistantResponse> {
-    const period = inferReportPeriod(params.transcript);
+    const period = inferReportPeriod(params.transcript, new Date(), params.session.timezone);
     const clinic = await this.apiCoreAdapter.getClinic(params.session);
     const clinicCode = clinic.code ?? clinic.id;
     const warnings: AssistantWarning[] = [];

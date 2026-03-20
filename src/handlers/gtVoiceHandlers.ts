@@ -149,6 +149,7 @@ const analyzeInternal = async (req: RequestWithContext, _mode: "analyze" | "quer
       const serviceResolution = entityResolutionService.resolveService(
         routedIntent.rawHints?.serviceName ?? recognized.transcript,
         catalog,
+        request.selectedOptionIds,
       );
 
       if (serviceResolution.state !== "resolved") {

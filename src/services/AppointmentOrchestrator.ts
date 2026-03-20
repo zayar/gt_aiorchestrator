@@ -141,7 +141,7 @@ export class AppointmentOrchestrator {
         };
       }
 
-      const timeHint = parseDateTimeHint(params.rawHints?.timeText ?? params.transcript);
+      const timeHint = parseDateTimeHint(params.rawHints?.timeText ?? params.transcript, new Date(), params.session.timezone);
       if (!timeHint.startAt) {
         const clarification = this.clarificationService.missingField(
           "Please choose the new booking date and time.",
@@ -192,14 +192,14 @@ export class AppointmentOrchestrator {
           requestedTime: {
             startAt: timeHint.startAt.toISOString(),
             endAt: endAt.toISOString(),
-            label: formatDateTimeLabel(timeHint.startAt),
+            label: formatDateTimeLabel(timeHint.startAt, params.session.timezone),
             confidence: timeHint.confidence,
           },
           rawHints: params.rawHints,
         },
         recommendedProducts: [],
         warnings,
-        summary: `Move booking ${booking.id} to ${formatDateTimeLabel(timeHint.startAt)}?`,
+        summary: `Move booking ${booking.id} to ${formatDateTimeLabel(timeHint.startAt, params.session.timezone)}?`,
         confirmRequired: true,
         proposedAction: {
           actionId: `${params.requestId}:booking:reschedule`,
@@ -228,6 +228,7 @@ export class AppointmentOrchestrator {
     const serviceResolution = this.entityResolutionService.resolveService(
       params.rawHints?.serviceName ?? params.transcript,
       catalog,
+      params.request.selectedOptionIds,
     );
 
     if (serviceResolution.state !== "resolved") {
@@ -267,7 +268,7 @@ export class AppointmentOrchestrator {
       catalog,
     });
 
-    const timeHint = parseDateTimeHint(params.rawHints?.timeText ?? params.transcript);
+    const timeHint = parseDateTimeHint(params.rawHints?.timeText ?? params.transcript, new Date(), params.session.timezone);
     if (!timeHint.startAt) {
       const clarification = this.clarificationService.missingField(
         "Please choose the appointment date and time.",
@@ -308,7 +309,7 @@ export class AppointmentOrchestrator {
 
     if (availablePractitioners.length === 0) {
       const clarification = this.clarificationService.unavailableSlot(
-        `No practitioners are available for ${service.name} at ${formatDateTimeLabel(timeHint.startAt)}.`,
+        `No practitioners are available for ${service.name} at ${formatDateTimeLabel(timeHint.startAt, params.session.timezone)}.`,
       );
 
       return {
@@ -326,7 +327,7 @@ export class AppointmentOrchestrator {
           requestedTime: {
             startAt: timeHint.startAt.toISOString(),
             endAt: endAt.toISOString(),
-            label: formatDateTimeLabel(timeHint.startAt),
+            label: formatDateTimeLabel(timeHint.startAt, params.session.timezone),
             confidence: timeHint.confidence,
           },
           rawHints: params.rawHints,
@@ -338,27 +339,39 @@ export class AppointmentOrchestrator {
       };
     }
 
-    const practitionerResolution = params.rawHints?.practitionerName
-      ? this.entityResolutionService.resolvePractitioner(params.rawHints.practitionerName, availablePractitioners)
-      : availablePractitioners.length === 1
-        ? {
-            state: "resolved" as const,
-            resolved: {
-              id: availablePractitioners[0].id,
-              name: availablePractitioners[0].name,
-              confidence: 0.95,
-              entity: availablePractitioners[0],
-            },
-            options: [],
-          }
-        : {
-            state: "missing" as const,
-            options: availablePractitioners.slice(0, 5).map((practitioner) => ({
-              id: practitioner.id,
-              type: "practitioner" as const,
-              label: practitioner.name,
-            })),
-          };
+    const practitionerResolution = params.request.selectedOptionIds?.some((candidateId) =>
+      availablePractitioners.some((practitioner) => practitioner.id === candidateId),
+    )
+      ? this.entityResolutionService.resolvePractitioner(
+          params.rawHints?.practitionerName ?? params.transcript,
+          availablePractitioners,
+          params.request.selectedOptionIds,
+        )
+      : params.rawHints?.practitionerName
+        ? this.entityResolutionService.resolvePractitioner(
+            params.rawHints.practitionerName,
+            availablePractitioners,
+            params.request.selectedOptionIds,
+          )
+        : availablePractitioners.length === 1
+          ? {
+              state: "resolved" as const,
+              resolved: {
+                id: availablePractitioners[0].id,
+                name: availablePractitioners[0].name,
+                confidence: 0.95,
+                entity: availablePractitioners[0],
+              },
+              options: [],
+            }
+          : {
+              state: "missing" as const,
+              options: availablePractitioners.slice(0, 5).map((practitioner) => ({
+                id: practitioner.id,
+                type: "practitioner" as const,
+                label: practitioner.name,
+              })),
+            };
 
     if (practitionerResolution.state !== "resolved") {
       const clarification =
@@ -389,7 +402,7 @@ export class AppointmentOrchestrator {
           requestedTime: {
             startAt: timeHint.startAt.toISOString(),
             endAt: endAt.toISOString(),
-            label: formatDateTimeLabel(timeHint.startAt),
+            label: formatDateTimeLabel(timeHint.startAt, params.session.timezone),
             confidence: timeHint.confidence,
           },
           rawHints: params.rawHints,
@@ -417,14 +430,14 @@ export class AppointmentOrchestrator {
           requestedTime: {
             startAt: timeHint.startAt.toISOString(),
             endAt: endAt.toISOString(),
-            label: formatDateTimeLabel(timeHint.startAt),
+            label: formatDateTimeLabel(timeHint.startAt, params.session.timezone),
             confidence: timeHint.confidence,
           },
           rawHints: params.rawHints,
         },
         recommendedProducts: recommendations,
         warnings,
-        summary: `${service.name} is available with ${resolvedPractitioner.name} at ${formatDateTimeLabel(timeHint.startAt)}.`,
+        summary: `${service.name} is available with ${resolvedPractitioner.name} at ${formatDateTimeLabel(timeHint.startAt, params.session.timezone)}.`,
         confirmRequired: false,
       };
     }
@@ -432,6 +445,7 @@ export class AppointmentOrchestrator {
     const memberResolution = await this.entityResolutionService.resolveMember(
       params.session,
       params.rawHints?.memberName,
+      params.request.selectedOptionIds,
     );
     const resolvedMember = memberResolution.resolved!;
 
@@ -457,7 +471,7 @@ export class AppointmentOrchestrator {
           requestedTime: {
             startAt: timeHint.startAt.toISOString(),
             endAt: endAt.toISOString(),
-            label: formatDateTimeLabel(timeHint.startAt),
+            label: formatDateTimeLabel(timeHint.startAt, params.session.timezone),
             confidence: timeHint.confidence,
           },
           rawHints: params.rawHints,
@@ -492,14 +506,14 @@ export class AppointmentOrchestrator {
         requestedTime: {
           startAt: timeHint.startAt.toISOString(),
           endAt: endAt.toISOString(),
-          label: formatDateTimeLabel(timeHint.startAt),
+          label: formatDateTimeLabel(timeHint.startAt, params.session.timezone),
           confidence: timeHint.confidence,
         },
         rawHints: params.rawHints,
       },
       recommendedProducts: recommendations,
       warnings,
-      summary: `Ready to book ${service.name} for ${resolvedMember.name} with ${resolvedPractitioner.name} at ${formatDateTimeLabel(timeHint.startAt)}.`,
+      summary: `Ready to book ${service.name} for ${resolvedMember.name} with ${resolvedPractitioner.name} at ${formatDateTimeLabel(timeHint.startAt, params.session.timezone)}.`,
       confirmRequired: true,
       proposedAction: {
         actionId: `${params.requestId}:booking:create`,

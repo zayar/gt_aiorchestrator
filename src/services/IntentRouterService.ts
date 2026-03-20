@@ -1,19 +1,7 @@
+import { config } from "../config/index.js";
+import { supportedAssistantIntents } from "../constants/assistantIntents.js";
 import type { AnalyzeAssistantRequest, AssistantIntent, IntentResult } from "../types/contracts.js";
 import { LlmIntentService } from "./LlmIntentService.js";
-
-const supportedIntents: AssistantIntent[] = [
-  "booking.create",
-  "booking.reschedule",
-  "booking.cancel",
-  "booking.availability_check",
-  "sale.create",
-  "sale.quote",
-  "inventory.check",
-  "recommend.products_for_service",
-  "report.booking_summary",
-  "report.sales_summary",
-  "report.practitioner_summary",
-];
 
 const extractWithRegex = (text: string, pattern: RegExp): string | undefined => {
   const match = text.match(pattern);
@@ -22,7 +10,7 @@ const extractWithRegex = (text: string, pattern: RegExp): string | undefined => 
 
 const extractTimeHint = (text: string): string | undefined => {
   const match = text.match(
-    /\b(today|tomorrow|this evening|this morning|this afternoon|monday|tuesday|wednesday|thursday|friday|saturday|sunday).*/i,
+    /\b(?:today|tomorrow|this evening|this morning|this afternoon|monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?:\s+(?:morning|afternoon|evening|night))?(?:\s+at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?)?/i,
   );
   if (match?.[0]) {
     return match[0].trim();
@@ -76,26 +64,40 @@ export class IntentRouterService {
       confidence = 0.8;
     }
 
+    const regexHints = {
+      memberName: extractWithRegex(transcript, /\bfor\s+([^,]+?)(?:\s+(?:today|tomorrow|with|at|this|on)\b|$)/i),
+      practitionerName: extractWithRegex(transcript, /\bwith\s+([^,]+?)(?:\s+(?:today|tomorrow|at|this|on)\b|$)/i),
+      bookingId: extractWithRegex(transcript, /\bbooking\s+#?([a-z0-9_-]{6,})\b/i),
+      timeText: extractTimeHint(transcript),
+      serviceName:
+        extractWithRegex(transcript, /\b(?:book|find|schedule|recommend products for|what products go with|create sale for)\s+([^,]+?)(?:\s+(?:for|with|today|tomorrow|at|this|on)\b|$)/i) ||
+        extractWithRegex(transcript, /\b(?:add|quote)\s+([^,]+)$/i),
+      productName: extractWithRegex(transcript, /\b(?:check if|is)\s+([^,]+?)\s+in stock\b/i),
+    };
+
     const llmHint = await this.llmIntentService.classify(transcript);
-    if (llmHint && supportedIntents.includes(llmHint.intent) && llmHint.confidence > confidence) {
+    if (llmHint && supportedAssistantIntents.includes(llmHint.intent) && llmHint.confidence > confidence) {
       intent = llmHint.intent;
       confidence = llmHint.confidence;
     }
+
+    const shouldUseLlmHints = Boolean(llmHint && llmHint.confidence >= config.llmMinConfidenceForHints);
+    const rawHints = shouldUseLlmHints
+      ? {
+          memberName: regexHints.memberName ?? llmHint?.memberHint,
+          practitionerName: regexHints.practitionerName ?? llmHint?.practitionerHint,
+          bookingId: regexHints.bookingId ?? llmHint?.bookingIdHint,
+          timeText: regexHints.timeText ?? llmHint?.timeHint,
+          serviceName: regexHints.serviceName ?? llmHint?.serviceHint,
+          productName: regexHints.productName ?? llmHint?.productHint,
+        }
+      : regexHints;
 
     return {
       intent,
       confidence,
       risky: ["booking.create", "booking.reschedule", "booking.cancel", "sale.create"].includes(intent),
-      rawHints: {
-        memberName: extractWithRegex(transcript, /\bfor\s+([^,]+?)(?:\s+(?:today|tomorrow|with|at|this|on)\b|$)/i),
-        practitionerName: extractWithRegex(transcript, /\bwith\s+([^,]+?)(?:\s+(?:today|tomorrow|at|this|on)\b|$)/i),
-        bookingId: extractWithRegex(transcript, /\bbooking\s+#?([a-z0-9_-]{6,})\b/i),
-        timeText: extractTimeHint(transcript),
-        serviceName:
-          extractWithRegex(transcript, /\b(?:book|find|schedule|recommend products for|what products go with|create sale for)\s+([^,]+?)(?:\s+(?:for|with|today|tomorrow|at|this|on)\b|$)/i) ||
-          extractWithRegex(transcript, /\b(?:add|quote)\s+([^,]+)$/i),
-        productName: extractWithRegex(transcript, /\b(?:check if|is)\s+([^,]+?)\s+in stock\b/i),
-      },
+      rawHints,
     };
   }
 }

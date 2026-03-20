@@ -12,10 +12,12 @@
     "node": ">=18"
   },
   "dependencies": {
+    "@google-cloud/vertexai": "^1.10.2",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
-    "multer": "^2.0.2"
+    "multer": "^2.0.2",
+    "openai": "^6.32.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",

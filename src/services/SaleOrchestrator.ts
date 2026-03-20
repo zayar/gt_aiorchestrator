@@ -71,6 +71,7 @@ export class SaleOrchestrator {
       const productResolution = this.entityResolutionService.resolveProduct(
         params.rawHints?.productName ?? params.transcript,
         catalog,
+        params.request.selectedOptionIds,
       );
 
       if (productResolution.state !== "resolved") {
@@ -221,6 +222,7 @@ export class SaleOrchestrator {
     const memberResolution = await this.entityResolutionService.resolveMember(
       params.session,
       params.rawHints?.memberName,
+      params.request.selectedOptionIds,
     );
     const memberResolved = memberResolution.state === "resolved" ? memberResolution.resolved : undefined;
 

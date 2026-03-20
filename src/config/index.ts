@@ -34,6 +34,19 @@ const getPositiveNumberEnv = (key: string, fallback: number): number => {
   return value;
 };
 
+const getUnitIntervalEnv = (key: string, fallback: number): number => {
+  const rawValue = String(process.env[key] ?? "").trim();
+  if (!rawValue) {
+    return fallback;
+  }
+
+  const value = Number(rawValue);
+  if (!Number.isFinite(value) || value < 0 || value > 1) {
+    throw new Error(`Invalid env var: ${key}. Expected a number between 0 and 1.`);
+  }
+  return value;
+};
+
 const getUrlEnv = (key: string, fallback: string): string => {
   const value = getStringEnv(key, fallback);
   try {
@@ -64,7 +77,21 @@ export const config = {
   previewCacheTtlMs: getPositiveNumberEnv("GT_PREVIEW_CACHE_TTL_MS", 15 * 60 * 1000),
   idempotencyTtlMs: getPositiveNumberEnv("GT_IDEMPOTENCY_TTL_MS", 60 * 60 * 1000),
   defaultTimezone: getStringEnv("DEFAULT_TIMEZONE", "Asia/Yangon"),
-  sttProvider: normalizeProvider(String(process.env.STT_PROVIDER ?? "stub"), ["stub"], "stub"),
-  llmProvider: normalizeProvider(String(process.env.LLM_PROVIDER ?? "heuristic"), ["heuristic"], "heuristic"),
+  sttProvider: normalizeProvider(String(process.env.STT_PROVIDER ?? "stub"), ["stub", "openai_whisper"], "stub"),
+  openAiApiKey: String(process.env.OPENAI_API_KEY ?? "").trim(),
+  openAiOrganization: String(process.env.OPENAI_ORG_ID ?? "").trim(),
+  openAiSttModel: getStringEnv("OPENAI_STT_MODEL", "whisper-1"),
+  sttTimeoutMs: getPositiveNumberEnv("STT_TIMEOUT_MS", 20000),
+  sttLowConfidenceThreshold: getUnitIntervalEnv("STT_LOW_CONFIDENCE_THRESHOLD", 0.68),
+  llmProvider: normalizeProvider(
+    String(process.env.LLM_PROVIDER ?? "heuristic"),
+    ["heuristic", "vertex_gemini"],
+    "heuristic",
+  ),
+  gcpProjectId: String(process.env.GCP_PROJECT_ID ?? "").trim(),
+  vertexRegion: getStringEnv("VERTEX_REGION", process.env.GCP_REGION ?? "asia-southeast1"),
+  vertexModel: getStringEnv("VERTEX_MODEL", "gemini-2.5-flash"),
+  llmTimeoutMs: getPositiveNumberEnv("LLM_TIMEOUT_MS", 10000),
+  llmMinConfidenceForHints: getUnitIntervalEnv("LLM_MIN_CONFIDENCE_FOR_HINTS", 0.6),
   enableDebugLogs: getBooleanEnv("ENABLE_DEBUG_LOGS", false),
 };

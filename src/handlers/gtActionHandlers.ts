@@ -1,6 +1,6 @@
 import type { Response } from "express";
 import { config } from "../config/index.js";
-import type { ConfirmActionRequest, ConfirmActionResponse } from "../types/contracts.js";
+import type { ConfirmActionRequest, ConfirmActionResponse, PendingActionRecord } from "../types/contracts.js";
 import type { RequestWithContext } from "../middleware/requestContext.js";
 import { AppError } from "../utils/errors.js";
 import { IdempotencyStore } from "../utils/idempotency.js";
@@ -56,7 +56,21 @@ export const handleConfirmAction = async (req: RequestWithContext, res: Response
     return;
   }
 
-  const pendingAction = pendingActionStore.get(requestId);
+  const pendingAction: PendingActionRecord | undefined =
+    pendingActionStore.get(requestId) ??
+    (body?.proposedAction
+      ? {
+          requestId,
+          transcript: "",
+          intent: body.proposedAction.intent,
+          proposedAction: body.proposedAction,
+          resolvedEntities: {},
+          recommendedProducts: [],
+          warnings: [],
+          createdAt: new Date().toISOString(),
+        }
+      : undefined);
+
   if (!pendingAction) {
     throw new AppError("No pending analyzed action was found for this requestId. Analyze again before confirming.", {
       statusCode: 404,

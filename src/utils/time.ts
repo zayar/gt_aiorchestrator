@@ -16,6 +16,81 @@ const setClock = (date: Date, hours: number, minutes = 0): Date => {
   return next;
 };
 
+type ZonedParts = {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+};
+
+const getZonedParts = (date: Date, timeZone: string): ZonedParts => {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+
+  const parts = formatter.formatToParts(date);
+  const read = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((part) => part.type === type)?.value ?? 0);
+
+  return {
+    year: read("year"),
+    month: read("month"),
+    day: read("day"),
+    hour: read("hour"),
+    minute: read("minute"),
+    second: read("second"),
+  };
+};
+
+const toLocalCalendarDate = (date: Date, timeZone: string): Date => {
+  const parts = getZonedParts(date, timeZone);
+  return new Date(Date.UTC(parts.year, parts.month - 1, parts.day, 0, 0, 0, 0));
+};
+
+const zonedTimeToUtc = (
+  local: {
+    year: number;
+    month: number;
+    day: number;
+    hour: number;
+    minute: number;
+    second?: number;
+  },
+  timeZone: string,
+): Date => {
+  const target = Date.UTC(local.year, local.month - 1, local.day, local.hour, local.minute, local.second ?? 0, 0);
+  let guess = new Date(target);
+
+  for (let index = 0; index < 4; index += 1) {
+    const actual = getZonedParts(guess, timeZone);
+    const actualAsUtc = Date.UTC(
+      actual.year,
+      actual.month - 1,
+      actual.day,
+      actual.hour,
+      actual.minute,
+      actual.second,
+      0,
+    );
+    const delta = target - actualAsUtc;
+    if (delta === 0) {
+      return guess;
+    }
+    guess = new Date(guess.getTime() + delta);
+  }
+
+  return guess;
+};
+
 const startOfDay = (date: Date): Date => setClock(date, 0, 0);
 const endOfDay = (date: Date): Date => setClock(date, 23, 59);
 
@@ -26,8 +101,9 @@ const nextWeekday = (baseDate: Date, targetDay: number): Date => {
   return next;
 };
 
-export const formatDateTimeLabel = (date: Date): string =>
+export const formatDateTimeLabel = (date: Date, timeZone = "UTC"): string =>
   date.toLocaleString("en-US", {
+    timeZone,
     year: "numeric",
     month: "short",
     day: "numeric",
@@ -41,22 +117,23 @@ export const buildEndTime = (startAt: Date, durationMinutes = 60): Date => {
   return endAt;
 };
 
-export const parseDateTimeHint = (text: string, now = new Date()) => {
+export const parseDateTimeHint = (text: string, now = new Date(), timeZone = "UTC") => {
   const normalized = String(text ?? "").toLowerCase();
   let baseDate: Date | null = null;
   let confidence = 0;
+  const todayLocal = toLocalCalendarDate(now, timeZone);
 
   if (normalized.includes("today")) {
-    baseDate = startOfDay(now);
+    baseDate = todayLocal;
     confidence += 0.35;
   } else if (normalized.includes("tomorrow")) {
-    baseDate = startOfDay(now);
-    baseDate.setDate(baseDate.getDate() + 1);
+    baseDate = new Date(todayLocal);
+    baseDate.setUTCDate(baseDate.getUTCDate() + 1);
     confidence += 0.4;
   } else {
     const weekday = Object.entries(weekdayIndex).find(([label]) => normalized.includes(label));
     if (weekday) {
-      baseDate = nextWeekday(now, weekday[1]);
+      baseDate = nextWeekday(todayLocal, weekday[1]);
       confidence += 0.35;
     }
   }
@@ -88,7 +165,7 @@ export const parseDateTimeHint = (text: string, now = new Date()) => {
   }
 
   if (!baseDate && hours !== null) {
-    baseDate = startOfDay(now);
+    baseDate = todayLocal;
   }
 
   if (!baseDate || hours === null) {
@@ -100,7 +177,16 @@ export const parseDateTimeHint = (text: string, now = new Date()) => {
     };
   }
 
-  const startAt = setClock(baseDate, hours, minutes);
+  const startAt = zonedTimeToUtc(
+    {
+      year: baseDate.getUTCFullYear(),
+      month: baseDate.getUTCMonth() + 1,
+      day: baseDate.getUTCDate(),
+      hour: hours,
+      minute: minutes,
+    },
+    timeZone,
+  );
   return {
     startAt,
     confidence: Math.min(confidence, 1),
@@ -109,31 +195,44 @@ export const parseDateTimeHint = (text: string, now = new Date()) => {
   };
 };
 
-export const inferReportPeriod = (text: string, now = new Date()): GTReportPeriod => {
+export const inferReportPeriod = (text: string, now = new Date(), timeZone = "UTC"): GTReportPeriod => {
   const normalized = String(text ?? "").toLowerCase();
+  const todayLocal = toLocalCalendarDate(now, timeZone);
+
+  const toUtcBoundary = (localDate: Date, hours: number, minutes: number): string =>
+    zonedTimeToUtc(
+      {
+        year: localDate.getUTCFullYear(),
+        month: localDate.getUTCMonth() + 1,
+        day: localDate.getUTCDate(),
+        hour: hours,
+        minute: minutes,
+      },
+      timeZone,
+    ).toISOString();
 
   if (normalized.includes("this week") || normalized.includes("week")) {
-    const start = startOfDay(now);
-    start.setDate(start.getDate() - start.getDay());
+    const start = new Date(todayLocal);
+    start.setUTCDate(start.getUTCDate() - start.getUTCDay());
     return {
       label: "this week",
-      fromDate: start.toISOString(),
-      toDate: endOfDay(now).toISOString(),
+      fromDate: toUtcBoundary(start, 0, 0),
+      toDate: toUtcBoundary(todayLocal, 23, 59),
     };
   }
 
   if (normalized.includes("this month") || normalized.includes("month")) {
-    const start = startOfDay(new Date(now.getFullYear(), now.getMonth(), 1));
+    const start = new Date(Date.UTC(todayLocal.getUTCFullYear(), todayLocal.getUTCMonth(), 1, 0, 0, 0, 0));
     return {
       label: "this month",
-      fromDate: start.toISOString(),
-      toDate: endOfDay(now).toISOString(),
+      fromDate: toUtcBoundary(start, 0, 0),
+      toDate: toUtcBoundary(todayLocal, 23, 59),
     };
   }
 
   return {
     label: "today",
-    fromDate: startOfDay(now).toISOString(),
-    toDate: endOfDay(now).toISOString(),
+    fromDate: toUtcBoundary(todayLocal, 0, 0),
+    toDate: toUtcBoundary(todayLocal, 23, 59),
   };
 };
