@@ -11,6 +11,37 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    env:
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      GCP_REGION: ${{ vars.GCP_REGION }}
+      CLOUD_RUN_SERVICE: ${{ vars.CLOUD_RUN_SERVICE }}
+      ARTIFACT_REGISTRY_REPOSITORY: ${{ vars.ARTIFACT_REGISTRY_REPOSITORY }}
+      CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT: ${{ vars.CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT }}
+      GT_APICORE_URL: ${{ vars.GT_APICORE_URL }}
+      GT_REQUEST_TIMEOUT_MS: ${{ vars.GT_REQUEST_TIMEOUT_MS }}
+      GT_CATALOG_CACHE_TTL_MS: ${{ vars.GT_CATALOG_CACHE_TTL_MS }}
+      GT_PREVIEW_CACHE_TTL_MS: ${{ vars.GT_PREVIEW_CACHE_TTL_MS }}
+      GT_IDEMPOTENCY_TTL_MS: ${{ vars.GT_IDEMPOTENCY_TTL_MS }}
+      DEFAULT_TIMEZONE: ${{ vars.DEFAULT_TIMEZONE }}
+      REQUEST_BODY_LIMIT: ${{ vars.REQUEST_BODY_LIMIT }}
+      LOG_REQUEST_BODIES: ${{ vars.LOG_REQUEST_BODIES }}
+      STT_PROVIDER: ${{ vars.STT_PROVIDER }}
+      OPENAI_STT_MODEL: ${{ vars.OPENAI_STT_MODEL }}
+      STT_TIMEOUT_MS: ${{ vars.STT_TIMEOUT_MS }}
+      STT_LOW_CONFIDENCE_THRESHOLD: ${{ vars.STT_LOW_CONFIDENCE_THRESHOLD }}
+      LLM_PROVIDER: ${{ vars.LLM_PROVIDER }}
+      VERTEX_REGION: ${{ vars.VERTEX_REGION }}
+      VERTEX_MODEL: ${{ vars.VERTEX_MODEL }}
+      LLM_TIMEOUT_MS: ${{ vars.LLM_TIMEOUT_MS }}
+      LLM_MIN_CONFIDENCE_FOR_HINTS: ${{ vars.LLM_MIN_CONFIDENCE_FOR_HINTS }}
+      ENABLE_DEBUG_LOGS: ${{ vars.ENABLE_DEBUG_LOGS }}
+      GCP_PROJECT_FOR_VERTEX: ${{ vars.GCP_PROJECT_ID }}
+      GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+      WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}
+      GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_API_KEY_SECRET: ${{ secrets.OPENAI_API_KEY_SECRET }}
+      OPENAI_ORG_ID: ${{ secrets.OPENAI_ORG_ID }}
     concurrency:
       group: gt-aiorchestrator-production
       cancel-in-progress: true
@@ -20,16 +51,6 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Validate configuration
-        env:
-          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
-          GCP_REGION: ${{ vars.GCP_REGION }}
-          CLOUD_RUN_SERVICE: ${{ vars.CLOUD_RUN_SERVICE }}
-          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
-          WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}
-          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_API_KEY_SECRET: ${{ secrets.OPENAI_API_KEY_SECRET }}
-          STT_PROVIDER: ${{ vars.STT_PROVIDER }}
         run: |
           set -euo pipefail
 
@@ -61,36 +82,32 @@ jobs:
         run: npm run build
 
       - name: Authenticate to Google Cloud with Workload Identity Federation
-        if: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER != '' && secrets.GCP_SERVICE_ACCOUNT != '' }}
+        if: ${{ env.WORKLOAD_IDENTITY_PROVIDER != '' && env.GCP_SERVICE_ACCOUNT != '' }}
         uses: google-github-actions/auth@v3
         with:
-          project_id: ${{ vars.GCP_PROJECT_ID }}
-          workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
           create_credentials_file: true
 
       - name: Authenticate to Google Cloud with service account key
-        if: ${{ !(secrets.WORKLOAD_IDENTITY_PROVIDER != '' && secrets.GCP_SERVICE_ACCOUNT != '') && secrets.GCP_SA_KEY != '' }}
+        if: ${{ !(env.WORKLOAD_IDENTITY_PROVIDER != '' && env.GCP_SERVICE_ACCOUNT != '') && env.GCP_SA_KEY != '' }}
         uses: google-github-actions/auth@v3
         with:
-          project_id: ${{ vars.GCP_PROJECT_ID }}
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          credentials_json: ${{ env.GCP_SA_KEY }}
           create_credentials_file: true
 
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v3
         with:
-          project_id: ${{ vars.GCP_PROJECT_ID }}
+          project_id: ${{ env.GCP_PROJECT_ID }}
           version: ">= 363.0.0"
 
       - name: Configure Docker auth
-        run: gcloud auth configure-docker "${{ vars.GCP_REGION }}-docker.pkg.dev" --quiet
+        run: gcloud auth configure-docker "${{ env.GCP_REGION }}-docker.pkg.dev" --quiet
 
       - name: Ensure Artifact Registry repository exists
-        env:
-          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
-          GCP_REGION: ${{ vars.GCP_REGION }}
-          ARTIFACT_REGISTRY_REPOSITORY: ${{ vars.ARTIFACT_REGISTRY_REPOSITORY }}
         run: |
           set -euo pipefail
 
@@ -108,11 +125,6 @@ jobs:
 
       - name: Build and push container image
         id: image
-        env:
-          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
-          GCP_REGION: ${{ vars.GCP_REGION }}
-          CLOUD_RUN_SERVICE: ${{ vars.CLOUD_RUN_SERVICE }}
-          ARTIFACT_REGISTRY_REPOSITORY: ${{ vars.ARTIFACT_REGISTRY_REPOSITORY }}
         run: |
           set -euo pipefail
 
@@ -127,32 +139,6 @@ jobs:
       - name: Deploy to Cloud Run
         env:
           IMAGE_URI: ${{ steps.image.outputs.image_uri }}
-          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
-          GCP_REGION: ${{ vars.GCP_REGION }}
-          CLOUD_RUN_SERVICE: ${{ vars.CLOUD_RUN_SERVICE }}
-          CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT: ${{ vars.CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT }}
-          GT_APICORE_URL: ${{ vars.GT_APICORE_URL }}
-          GT_REQUEST_TIMEOUT_MS: ${{ vars.GT_REQUEST_TIMEOUT_MS }}
-          GT_CATALOG_CACHE_TTL_MS: ${{ vars.GT_CATALOG_CACHE_TTL_MS }}
-          GT_PREVIEW_CACHE_TTL_MS: ${{ vars.GT_PREVIEW_CACHE_TTL_MS }}
-          GT_IDEMPOTENCY_TTL_MS: ${{ vars.GT_IDEMPOTENCY_TTL_MS }}
-          DEFAULT_TIMEZONE: ${{ vars.DEFAULT_TIMEZONE }}
-          REQUEST_BODY_LIMIT: ${{ vars.REQUEST_BODY_LIMIT }}
-          LOG_REQUEST_BODIES: ${{ vars.LOG_REQUEST_BODIES }}
-          STT_PROVIDER: ${{ vars.STT_PROVIDER }}
-          OPENAI_STT_MODEL: ${{ vars.OPENAI_STT_MODEL }}
-          STT_TIMEOUT_MS: ${{ vars.STT_TIMEOUT_MS }}
-          STT_LOW_CONFIDENCE_THRESHOLD: ${{ vars.STT_LOW_CONFIDENCE_THRESHOLD }}
-          LLM_PROVIDER: ${{ vars.LLM_PROVIDER }}
-          VERTEX_REGION: ${{ vars.VERTEX_REGION }}
-          VERTEX_MODEL: ${{ vars.VERTEX_MODEL }}
-          LLM_TIMEOUT_MS: ${{ vars.LLM_TIMEOUT_MS }}
-          LLM_MIN_CONFIDENCE_FOR_HINTS: ${{ vars.LLM_MIN_CONFIDENCE_FOR_HINTS }}
-          ENABLE_DEBUG_LOGS: ${{ vars.ENABLE_DEBUG_LOGS }}
-          GCP_PROJECT_FOR_VERTEX: ${{ vars.GCP_PROJECT_ID }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_API_KEY_SECRET: ${{ secrets.OPENAI_API_KEY_SECRET }}
-          OPENAI_ORG_ID: ${{ secrets.OPENAI_ORG_ID }}
         run: |
           set -euo pipefail
 
