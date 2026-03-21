@@ -41,12 +41,24 @@ const stripQuantity = (segment: string): string =>
     .replace(/\s+/g, " ")
     .trim();
 
-const parseLineItemPhrases = (transcript: string): string[] =>
-  transcript
+const parseLineItemPhrases = (
+  transcript: string,
+  rawHints?: { serviceName?: string; productName?: string },
+): string[] => {
+  const hintedSegments = [rawHints?.serviceName, rawHints?.productName]
+    .map((value) => String(value ?? "").trim())
+    .filter(Boolean);
+
+  if (hintedSegments.length > 0) {
+    return hintedSegments;
+  }
+
+  return transcript
     .replace(/\b(add|create sale|create sale for|quote|check if|is|in stock)\b/gi, " ")
     .split(/\s+(?:and|plus)\s+|,/i)
     .map((segment) => segment.trim())
     .filter(Boolean);
+};
 
 export class SaleOrchestrator {
   constructor(
@@ -143,7 +155,10 @@ export class SaleOrchestrator {
       };
     }
 
-    const segments = parseLineItemPhrases(params.transcript);
+    const segments = parseLineItemPhrases(params.transcript, {
+      serviceName: params.rawHints?.serviceName,
+      productName: params.rawHints?.productName,
+    });
     const lineItems: GTSaleDraftLineItem[] = [];
     const candidateOptions = new Map<string, CandidateOption>();
     let primaryServiceName: string | undefined;
@@ -235,7 +250,7 @@ export class SaleOrchestrator {
 
     const memberResolution = await this.entityResolutionService.resolveMember(
       params.session,
-      params.rawHints?.memberName,
+      params.rawHints?.memberName ?? params.transcript,
       params.request.selectedOptionIds,
     );
     const memberResolved = memberResolution.state === "resolved" ? memberResolution.resolved : undefined;

@@ -10,7 +10,14 @@ const extractWithRegex = (text: string, pattern: RegExp): string | undefined => 
 
 const cleanTrailingBookingWords = (value: string | undefined): string | undefined =>
   String(value ?? "")
-    .replace(/\b(appointment|book|booking|service|slot|create|sale)\b/gi, " ")
+    .replace(/\b(appointment|book|booking|slot|create|sale)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim() || undefined;
+
+const cleanTrailingSaleWords = (value: string | undefined): string | undefined =>
+  String(value ?? "")
+    .replace(/\b(create|sale|sell|quote)\b/gi, " ")
+    .replace(/(ရောင်းမယ်|ရောင်း မယ်|ေရာင္းမယ္|ေရာင္း)/gu, " ")
     .replace(/\s+/g, " ")
     .trim() || undefined;
 
@@ -85,10 +92,22 @@ const extractEnglishBookingServiceHint = (text: string): string | undefined =>
       extractWithRegex(text, /([a-z][a-z0-9 &+/'().-]{2,}?)\s+(?:appointment|booking)\b/i),
   );
 
+const extractSaleItemHint = (text: string): string | undefined =>
+  cleanTrailingSaleWords(
+    extractWithRegex(text, /\sအတွက်\s+([a-z][a-z0-9 &+/'().-]{1,}?)\s+ရောင်း/i) ||
+      extractWithRegex(text, /\sကို\s+([a-z][a-z0-9 &+/'().-]{1,}?)\s+ရောင်း/i) ||
+      extractWithRegex(text, /([a-z][a-z0-9 &+/'().-]{1,}?)\s+ရောင်း/i) ||
+      extractWithRegex(
+        text,
+        /\b(?:sell|create sale for|create sale|quote)\s+([a-z][a-z0-9 &+/'().-]{1,}?)(?:\s+(?:for|to|with|today|tomorrow|on|at)\b|$)/i,
+      ),
+  );
+
 const extractServiceHint = (text: string): string | undefined =>
   cleanTrailingBookingWords(
     extractMyanmarServiceHint(text) ||
       extractEnglishBookingServiceHint(text) ||
+      extractSaleItemHint(text) ||
     extractWithRegex(
       text,
       /\b(?:book|find|schedule|recommend products for|what products go with|create sale for)\s+([^,]+?)(?:\s+(?:for|with|today|tomorrow|at|this|on)\b|$)/i,
@@ -98,13 +117,6 @@ const extractServiceHint = (text: string): string | undefined =>
   );
 
 const extractTimeHint = (text: string): string | undefined => {
-  const hasDateCue =
-    /\b(today|tomorrow|this evening|this morning|this afternoon|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(
-      text,
-    ) ||
-    /(ဒီနေ့|ဒီေန႔|မနက်ဖြန်|မနက္ျဖန္|မနက်ဖန်|မနက္ဖန္|တနင်္လာ|တနလၤာ|အင်္ဂါ|အဂၤါ|ဗုဒ္ဓဟူး|ဗုဒၶဟူး|ကြာသပတေး|ၾကာသပေတး|သောကြာ|ေသာၾကာ|စနေ|စေန|တနင်္ဂနွေ|တနဂၤေႏြ)/i.test(
-      text,
-    );
   const match = text.match(
     /\b(?:today|tomorrow|this evening|this morning|this afternoon|monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?:\s+(?:morning|afternoon|evening|night))?(?:\s+at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?)?/i,
   );
@@ -124,8 +136,29 @@ const extractTimeHint = (text: string): string | undefined => {
     return myanmarTimeOnly[0].trim();
   }
 
-  const timeOnly = hasDateCue ? text.match(/\b\d{1,2}(?::\d{2})?\s*(am|pm)?\b/i) : text.match(/\bat\s+\d{1,2}(?::\d{2})?\s*(am|pm)\b/i);
-  return timeOnly?.[0]?.trim() || undefined;
+  const explicitTime =
+    text.match(/\bat\s+\d{1,2}(?::\d{2})?\s*(am|pm)?\b/i) ||
+    text.match(/\b\d{1,2}(?::\d{2})?\s*(am|pm)\b/i);
+  return explicitTime?.[0]?.trim() || undefined;
+};
+
+const sanitizeTimeHint = (
+  transcript: string,
+  hint: string | undefined,
+  intent: AssistantIntent,
+): string | undefined => {
+  const value = String(hint ?? "").trim();
+  if (!value) {
+    return undefined;
+  }
+
+  if (intent.startsWith("sale.") || intent === "inventory.check") {
+    if (/^\d+$/.test(value) && !/\b(am|pm)\b|နာရီ|at\b/i.test(transcript)) {
+      return undefined;
+    }
+  }
+
+  return value;
 };
 
 export class IntentRouterService {
@@ -178,6 +211,8 @@ export class IntentRouterService {
       confidence = 0.8;
     }
 
+    const saleItemHint = hasSaleCue ? extractSaleItemHint(transcript) : undefined;
+    const regexTimeHint = sanitizeTimeHint(transcript, extractTimeHint(transcript), intent);
     const regexHints = {
       memberName:
         extractWithRegex(transcript, /\bfor\s+([^,]+?)(?:\s+(?:today|tomorrow|with|at|this|on)\b|$)/i) ||
@@ -185,8 +220,8 @@ export class IntentRouterService {
         extractMyanmarMemberHintFromAhtwet(transcript),
       practitionerName: extractWithRegex(transcript, /\bwith\s+([^,]+?)(?:\s+(?:today|tomorrow|at|this|on)\b|$)/i),
       bookingId: extractWithRegex(transcript, /\bbooking\s+#?([a-z0-9_-]{6,})\b/i),
-      timeText: extractTimeHint(transcript),
-      serviceName: extractServiceHint(transcript),
+      timeText: regexTimeHint,
+      serviceName: saleItemHint ?? extractServiceHint(transcript),
       productName: extractWithRegex(transcript, /\b(?:check if|is)\s+([^,]+?)\s+in stock\b/i),
     };
 
@@ -202,7 +237,7 @@ export class IntentRouterService {
           memberName: regexHints.memberName ?? llmHint?.memberHint,
           practitionerName: regexHints.practitionerName ?? llmHint?.practitionerHint,
           bookingId: regexHints.bookingId ?? llmHint?.bookingIdHint,
-          timeText: regexHints.timeText ?? llmHint?.timeHint,
+          timeText: regexHints.timeText ?? sanitizeTimeHint(transcript, llmHint?.timeHint, intent),
           serviceName: regexHints.serviceName ?? llmHint?.serviceHint,
           productName: regexHints.productName ?? llmHint?.productHint,
         }
