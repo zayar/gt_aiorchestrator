@@ -125,6 +125,31 @@ const MEMBERS_QUERY = `
   }
 `;
 
+const CLINIC_MEMBER_REFERENCE_QUERY = `
+  query MembersReference(
+    $where: MemberWhereInput
+    $orderBy: [MemberOrderByWithRelationInput!]
+    $take: Int
+    $clinicMembersWhere2: ClinicMemberWhereInput
+  ) {
+    members(where: $where, orderBy: $orderBy, take: $take) {
+      id
+      name
+      phonenumber
+      member_id
+      metadata
+      note
+      clinic_members(where: $clinicMembersWhere2) {
+        name
+        phonenumber
+        member_id
+        metadata
+        note
+      }
+    }
+  }
+`;
+
 const MEMBER_BY_ID_QUERY = `
   query Member($where: MemberWhereUniqueInput!, $clinicMembersWhere2: ClinicMemberWhereInput) {
     member(where: $where) {
@@ -648,6 +673,39 @@ export class GTApiCoreAdapter {
     });
 
     return (result.getMembers ?? []).map((row) => mapMember(row));
+  }
+
+  async listClinicMembers(session: GTSessionContext, take = 200): Promise<GTMember[]> {
+    const result = await this.query<{ members: Array<Record<string, unknown>> }>(session, CLINIC_MEMBER_REFERENCE_QUERY, {
+      where: {
+        clinics: {
+          some: {
+            id: { equals: session.clinicId },
+          },
+        },
+      },
+      clinicMembersWhere2: {
+        clinic_id: { equals: session.clinicId },
+      },
+      orderBy: [{ created_at: "desc" }],
+      take,
+    });
+
+    return (result.members ?? []).map((row) => {
+      const clinicMember =
+        Array.isArray(row.clinic_members) && row.clinic_members.length > 0
+          ? (row.clinic_members[0] as Record<string, unknown>)
+          : null;
+
+      return {
+        id: String(row.id),
+        name: String(clinicMember?.name ?? row.name ?? "Unnamed member").trim() || "Unnamed member",
+        phoneNumber: String(clinicMember?.phonenumber ?? row.phonenumber ?? "").trim() || null,
+        memberCode: String(clinicMember?.member_id ?? row.member_id ?? "").trim() || null,
+        metadata: String(clinicMember?.metadata ?? row.metadata ?? "").trim() || null,
+        note: String(clinicMember?.note ?? row.note ?? "").trim() || null,
+      };
+    });
   }
 
   async getMemberById(session: GTSessionContext, memberId: string): Promise<GTMember | null> {

@@ -10,6 +10,43 @@ const weekdayIndex: Record<string, number> = {
   saturday: 6,
 };
 
+const myanmarDigitMap: Record<string, string> = {
+  "၀": "0",
+  "၁": "1",
+  "၂": "2",
+  "၃": "3",
+  "၄": "4",
+  "၅": "5",
+  "၆": "6",
+  "၇": "7",
+  "၈": "8",
+  "၉": "9",
+};
+
+const myanmarWeekdayIndex: Record<string, number> = {
+  "တနင်္ဂနွေ": 0,
+  "တနဂၤေႏြ": 0,
+  "တနင်္လာ": 1,
+  "တနလၤာ": 1,
+  "အင်္ဂါ": 2,
+  "အဂၤါ": 2,
+  "ဗုဒ္ဓဟူး": 3,
+  "ဗုဒၶဟူး": 3,
+  "ကြာသပတေး": 4,
+  "ၾကာသပေတး": 4,
+  "သောကြာ": 5,
+  "ေသာၾကာ": 5,
+  "စနေ": 6,
+  "စေန": 6,
+};
+
+const normalizeDateTimeText = (value: string): string =>
+  String(value ?? "")
+    .replace(/[၀-၉]/g, (digit) => myanmarDigitMap[digit] ?? digit)
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+
 const setClock = (date: Date, hours: number, minutes = 0): Date => {
   const next = new Date(date);
   next.setHours(hours, minutes, 0, 0);
@@ -118,29 +155,49 @@ export const buildEndTime = (startAt: Date, durationMinutes = 60): Date => {
 };
 
 export const parseDateTimeHint = (text: string, now = new Date(), timeZone = "UTC") => {
-  const normalized = String(text ?? "").toLowerCase();
+  const normalized = normalizeDateTimeText(text);
   let baseDate: Date | null = null;
   let confidence = 0;
   const todayLocal = toLocalCalendarDate(now, timeZone);
 
-  if (normalized.includes("today")) {
+  if (normalized.includes("today") || normalized.includes("ဒီနေ့") || normalized.includes("ဒီေန႔")) {
     baseDate = todayLocal;
     confidence += 0.35;
-  } else if (normalized.includes("tomorrow")) {
+  } else if (
+    normalized.includes("tomorrow") ||
+    normalized.includes("မနက်ဖြန်") ||
+    normalized.includes("မနက္ျဖန္") ||
+    normalized.includes("မနက်ဖန်") ||
+    normalized.includes("မနက္ဖန္")
+  ) {
     baseDate = new Date(todayLocal);
     baseDate.setUTCDate(baseDate.getUTCDate() + 1);
     confidence += 0.4;
   } else {
     const weekday = Object.entries(weekdayIndex).find(([label]) => normalized.includes(label));
+    const myanmarWeekday = Object.entries(myanmarWeekdayIndex).find(([label]) => normalized.includes(label));
     if (weekday) {
       baseDate = nextWeekday(todayLocal, weekday[1]);
+      confidence += 0.35;
+    } else if (myanmarWeekday) {
+      baseDate = nextWeekday(todayLocal, myanmarWeekday[1]);
       confidence += 0.35;
     }
   }
 
-  const timeMatch = normalized.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/);
+  const timeMatch = normalized.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm|နာရီ)?\b/);
   let hours: number | null = null;
   let minutes = 0;
+  const hasMorningHint =
+    normalized.includes("morning") || normalized.includes("မနက်") || normalized.includes("နံနက်");
+  const hasAfternoonHint =
+    normalized.includes("afternoon") || normalized.includes("နေ့လယ်") || normalized.includes("ေန႔လယ္");
+  const hasEveningHint =
+    normalized.includes("evening") ||
+    normalized.includes("night") ||
+    normalized.includes("ညနေ") ||
+    normalized.includes("ညေန") ||
+    normalized.includes("ည");
 
   if (timeMatch) {
     hours = Number(timeMatch[1]);
@@ -152,14 +209,23 @@ export const parseDateTimeHint = (text: string, now = new Date(), timeZone = "UT
     if (meridiem === "am" && hours === 12) {
       hours = 0;
     }
+    if (meridiem === "နာရီ") {
+      if (hasEveningHint && hours < 12) {
+        hours += 12;
+      } else if (hasAfternoonHint && hours < 12) {
+        hours += 12;
+      } else if (hasMorningHint && hours === 12) {
+        hours = 0;
+      }
+    }
     confidence += 0.45;
-  } else if (normalized.includes("morning")) {
+  } else if (hasMorningHint) {
     hours = 9;
     confidence += 0.22;
-  } else if (normalized.includes("afternoon")) {
+  } else if (hasAfternoonHint) {
     hours = 14;
     confidence += 0.22;
-  } else if (normalized.includes("evening")) {
+  } else if (hasEveningHint) {
     hours = 18;
     confidence += 0.22;
   }

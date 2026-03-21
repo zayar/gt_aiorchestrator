@@ -55,7 +55,7 @@ export class GTCatalogService {
       return cached.slice(0, Math.max(1, limit));
     }
 
-    const members = await this.apiCoreAdapter.searchMembers(session, "");
+    const members = await this.apiCoreAdapter.listClinicMembers(session, Math.max(limit, 200));
     const cachedMembers = members.slice(0, Math.max(limit, 180));
     this.memberReferenceCache.set(cacheKey, cachedMembers);
 

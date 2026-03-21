@@ -1,7 +1,7 @@
 const normalize = (value: string): string =>
   String(value ?? "")
     .toLowerCase()
-    .replace(/[^a-z0-9\s]/gi, " ")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
 
@@ -32,6 +32,19 @@ const STOPWORDS = new Set([
   "stock",
   "summary",
   "summarize",
+  "ကို",
+  "မှာ",
+  "တွင်",
+  "နဲ",
+  "နဲ့",
+  "ပါ",
+  "တယ်",
+  "လုပ်ချင်",
+  "လုပ်",
+  "ချင်",
+  "ဒီနေ့",
+  "မနက်ဖြန်",
+  "နာရီ",
 ]);
 
 const tokenize = (value: string, removeStopwords = false): string[] =>
@@ -119,6 +132,7 @@ export const similarity = (left: string, right: string): number => {
   const containsScore =
     normalizedLeft.includes(normalizedRight) || normalizedRight.includes(normalizedLeft) ? 0.85 : 0;
   const significantContainsScore = containsAllSignificantTokens(normalizedLeft, normalizedRight) ? 0.94 : 0;
+  const inverseSignificantContainsScore = containsAllSignificantTokens(normalizedRight, normalizedLeft) ? 0.97 : 0;
   const significantOverlapScore = significantTokenOverlap(normalizedLeft, normalizedRight) * 0.97;
 
   return Math.max(
@@ -126,6 +140,7 @@ export const similarity = (left: string, right: string): number => {
     tokenOverlap(normalizedLeft, normalizedRight) * 0.9,
     containsScore,
     significantContainsScore,
+    inverseSignificantContainsScore,
     significantOverlapScore,
   );
 };

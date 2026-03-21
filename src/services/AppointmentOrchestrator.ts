@@ -444,7 +444,7 @@ export class AppointmentOrchestrator {
 
     const memberResolution = await this.entityResolutionService.resolveMember(
       params.session,
-      params.rawHints?.memberName,
+      params.rawHints?.memberName ?? params.transcript,
       params.request.selectedOptionIds,
     );
     const resolvedMember = memberResolution.resolved!;

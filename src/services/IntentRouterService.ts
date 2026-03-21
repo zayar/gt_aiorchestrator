@@ -8,12 +8,68 @@ const extractWithRegex = (text: string, pattern: RegExp): string | undefined => 
   return String(match?.[1] ?? "").trim() || undefined;
 };
 
+const cleanTrailingBookingWords = (value: string | undefined): string | undefined =>
+  String(value ?? "")
+    .replace(/\b(appointment|book|booking|service|slot)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim() || undefined;
+
+const extractMyanmarMemberHint = (text: string): string | undefined => {
+  const parts = text.split(/\s+ကို\b/);
+  if (parts.length < 2) {
+    return undefined;
+  }
+
+  const left = String(parts[0] ?? "").trim();
+  if (!left) {
+    return undefined;
+  }
+
+  const trimmed = left
+    .replace(
+      /\b(today|tomorrow)\b|ဒီနေ့|ဒီေန႔|မနက်ဖြန်|မနက္ျဖန္|မနက်ဖန်|မနက္ဖန္|\d{1,2}|[၀-၉]{1,2}|နာရီ|မှာ|တြင္|တွင်/gi,
+      " ",
+    )
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const tokens = trimmed.split(/\s+/).filter(Boolean);
+  return tokens.slice(-3).join(" ").trim() || undefined;
+};
+
+const extractServiceHint = (text: string): string | undefined =>
+  cleanTrailingBookingWords(
+    extractWithRegex(
+      text,
+      /\b(?:book|find|schedule|recommend products for|what products go with|create sale for)\s+([^,]+?)(?:\s+(?:for|with|today|tomorrow|at|this|on)\b|$)/i,
+    ) ||
+      extractWithRegex(text, /\b(?:add|quote)\s+([^,]+)$/i) ||
+      extractWithRegex(text, /([a-z][a-z0-9 &+/'().-]{2,}?)\s+appointment\b/i) ||
+      extractWithRegex(text, /\sကို\s+([a-z][a-z0-9 &+/'().-]{2,}?)\s+appointment\b/i),
+  );
+
 const extractTimeHint = (text: string): string | undefined => {
   const match = text.match(
     /\b(?:today|tomorrow|this evening|this morning|this afternoon|monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?:\s+(?:morning|afternoon|evening|night))?(?:\s+at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?)?/i,
   );
   if (match?.[0]) {
     return match[0].trim();
+  }
+
+  const myanmarDateTime = text.match(
+    /(ဒီနေ့|ဒီေန႔|မနက်ဖြန်|မနက္ျဖန္|မနက်ဖန်|မနက္ဖန္|တနင်္လာ|တနလၤာ|အင်္ဂါ|အဂၤါ|ဗုဒ္ဓဟူး|ဗုဒၶဟူး|ကြာသပတေး|ၾကာသပေတး|သောကြာ|ေသာၾကာ|စနေ|စေန|တနင်္ဂနွေ|တနဂၤေႏြ).{0,20}?([၀-၉]|\d){1,2}(?::([၀-၉]|\d){2})?\s*နာရီ?/i,
+  );
+  if (myanmarDateTime?.[0]) {
+    return myanmarDateTime[0].trim();
+  }
+
+  const myanmarTimeOnly = text.match(/([၀-၉]|\d){1,2}(?::([၀-၉]|\d){2})?\s*နာရီ/i);
+  if (myanmarTimeOnly?.[0]) {
+    return myanmarTimeOnly[0].trim();
   }
 
   const timeOnly = text.match(/\b\d{1,2}(?::\d{2})?\s*(am|pm)?\b/i);
@@ -29,16 +85,16 @@ export class IntentRouterService {
     let intent: AssistantIntent = "unknown";
     let confidence = 0.35;
 
-    if (/\b(reschedule|move booking|move appointment)\b/.test(normalized)) {
+    if (/\b(reschedule|move booking|move appointment)\b|ရက်ချိန်းပြောင်း|ဘိုကင်ပြောင်း/.test(normalized)) {
       intent = "booking.reschedule";
       confidence = 0.88;
-    } else if (/\b(cancel booking|cancel appointment|cancel her booking|cancel it)\b/.test(normalized)) {
+    } else if (/\b(cancel booking|cancel appointment|cancel her booking|cancel it)\b|ရက်ချိန်းဖျက်|ဘိုကင်ဖျက်/.test(normalized)) {
       intent = "booking.cancel";
       confidence = 0.86;
-    } else if (/\b(free slot|availability|available slot|find a free slot)\b/.test(normalized)) {
+    } else if (/\b(free slot|availability|available slot|find a free slot)\b|အားလပ်ချိန်|အားလပ် slot/.test(normalized)) {
       intent = "booking.availability_check";
       confidence = 0.88;
-    } else if (/\b(book|schedule appointment|new appointment)\b/.test(normalized)) {
+    } else if (/\b(book|schedule appointment|new appointment)\b|appointment book|ရက်ချိန်း|ဘိုကင်/.test(normalized)) {
       intent = "booking.create";
       confidence = 0.9;
     } else if (/\b(recommend|go with|related to this service|related products|included or related)\b/.test(normalized)) {
@@ -65,13 +121,13 @@ export class IntentRouterService {
     }
 
     const regexHints = {
-      memberName: extractWithRegex(transcript, /\bfor\s+([^,]+?)(?:\s+(?:today|tomorrow|with|at|this|on)\b|$)/i),
+      memberName:
+        extractWithRegex(transcript, /\bfor\s+([^,]+?)(?:\s+(?:today|tomorrow|with|at|this|on)\b|$)/i) ||
+        extractMyanmarMemberHint(transcript),
       practitionerName: extractWithRegex(transcript, /\bwith\s+([^,]+?)(?:\s+(?:today|tomorrow|at|this|on)\b|$)/i),
       bookingId: extractWithRegex(transcript, /\bbooking\s+#?([a-z0-9_-]{6,})\b/i),
       timeText: extractTimeHint(transcript),
-      serviceName:
-        extractWithRegex(transcript, /\b(?:book|find|schedule|recommend products for|what products go with|create sale for)\s+([^,]+?)(?:\s+(?:for|with|today|tomorrow|at|this|on)\b|$)/i) ||
-        extractWithRegex(transcript, /\b(?:add|quote)\s+([^,]+)$/i),
+      serviceName: extractServiceHint(transcript),
       productName: extractWithRegex(transcript, /\b(?:check if|is)\s+([^,]+?)\s+in stock\b/i),
     };
 
