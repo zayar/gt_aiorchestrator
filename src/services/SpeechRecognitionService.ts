@@ -78,6 +78,48 @@ const normalizeDetectedLanguageCode = (detected: string | undefined, fallback: s
   return raw;
 };
 
+const countMatches = (value: string, pattern: RegExp): number => {
+  return value.match(pattern)?.length ?? 0;
+};
+
+const containsMyanmarScript = (value: string): boolean => {
+  return /[\u1000-\u109F\uAA60-\uAA7F]/u.test(value);
+};
+
+const looksSuspiciousForMyanmar = (transcript: string): boolean => {
+  const trimmed = transcript.trim();
+  if (!trimmed) {
+    return true;
+  }
+
+  if (containsMyanmarScript(trimmed)) {
+    return false;
+  }
+
+  const asciiLetters = countMatches(trimmed, /[A-Za-z]/g);
+  return asciiLetters >= 10;
+};
+
+const buildTranscriptionPrompt = (languageHint: string | undefined): string => {
+  if (languageHint === "my") {
+    return [
+      "This is a GreatTime clinic voice assistant for Myanmar clinics.",
+      "Transcribe Burmese or Myanmar speech exactly as spoken.",
+      "Keep Burmese words in Burmese script whenever they are spoken in Burmese.",
+      "Do not translate Burmese speech into English.",
+      "Keep member names, service names, product names, practitioner names, phone numbers, dates, times, and quantities exactly as spoken.",
+      "Clinic terms may include consultation, booking, hydrafacial, serum, sunscreen, facial, laser, Dr Min, Ma Su, and Piti Aesthetic.",
+    ].join(" ");
+  }
+
+  return [
+    "GreatTime clinic voice assistant transcription.",
+    "Transcribe the audio exactly as spoken.",
+    "Keep member names, service names, product names, practitioner names, phone numbers, dates, times, and quantities exactly as spoken.",
+    "Do not summarize or rewrite the speech.",
+  ].join(" ");
+};
+
 const clampUnit = (value: number): number => {
   if (value <= 0) {
     return 0;
@@ -139,6 +181,33 @@ const createOpenAiClient = (): OpenAI => {
   return openAiClient;
 };
 
+const transcribeWithOpenAi = async (params: {
+  requestId: string;
+  audioBase64: string;
+  mimeType: string;
+  model: string;
+  languageHint?: string;
+  prompt: string;
+  timeoutMs: number;
+}): Promise<WhisperVerboseTranscription> => {
+  const file = await toFile(Buffer.from(params.audioBase64, "base64"), `assistant-${params.requestId}.m4a`, {
+    type: params.mimeType,
+  });
+
+  return (await withTimeout(
+    createOpenAiClient().audio.transcriptions.create({
+      file,
+      model: params.model,
+      language: params.languageHint,
+      prompt: params.prompt,
+      response_format: "verbose_json",
+      temperature: 0,
+    }),
+    params.timeoutMs,
+    "OpenAI Whisper transcription",
+  )) as WhisperVerboseTranscription;
+};
+
 export class SpeechRecognitionService {
   async recognize(input: SpeechRecognitionInput): Promise<SpeechRecognitionOutput> {
     const transcript = String(input.transcript ?? "").trim();
@@ -179,23 +248,21 @@ export class SpeechRecognitionService {
 
     const mimeType = String(input.mimeType ?? "audio/m4a").trim() || "audio/m4a";
     const languageCode = String(input.language ?? "en-US").trim() || "en-US";
+    const languageHint = normalizeLanguageHint(input.language);
+    const prompt = buildTranscriptionPrompt(languageHint);
 
     try {
-      const file = await toFile(Buffer.from(audioBase64, "base64"), `assistant-${input.requestId}.m4a`, {
-        type: mimeType,
+      let response = await transcribeWithOpenAi({
+        requestId: input.requestId,
+        audioBase64,
+        mimeType,
+        model: config.openAiSttModel,
+        languageHint,
+        prompt,
+        timeoutMs: config.sttTimeoutMs,
       });
-      const response = (await withTimeout(
-        createOpenAiClient().audio.transcriptions.create({
-          file,
-          model: config.openAiSttModel,
-          language: normalizeLanguageHint(input.language),
-          response_format: "verbose_json",
-        }),
-        config.sttTimeoutMs,
-        "OpenAI Whisper transcription",
-      )) as WhisperVerboseTranscription;
 
-      const recognizedTranscript = String(response.text ?? "").trim();
+      let recognizedTranscript = String(response.text ?? "").trim();
       if (!recognizedTranscript) {
         throw new AppError("Audio transcription returned an empty transcript.", {
           statusCode: 502,
@@ -203,7 +270,40 @@ export class SpeechRecognitionService {
         });
       }
 
-      const confidence = estimateConfidence(response, recognizedTranscript);
+      let confidence = estimateConfidence(response, recognizedTranscript);
+      if (languageHint === "my" && looksSuspiciousForMyanmar(recognizedTranscript)) {
+        logger.warn("Retrying low-confidence Myanmar transcription without fixed language hint", {
+          requestId: input.requestId,
+          requestedLanguage: input.language,
+          transcriptPreview: recognizedTranscript.slice(0, 160),
+          confidence,
+        });
+
+        const retryResponse = await transcribeWithOpenAi({
+          requestId: `${input.requestId}-retry`,
+          audioBase64,
+          mimeType,
+          model: config.openAiSttModel,
+          prompt,
+          timeoutMs: config.sttTimeoutMs,
+        });
+        const retryTranscript = String(retryResponse.text ?? "").trim();
+        const retryConfidence = retryTranscript
+          ? estimateConfidence(retryResponse, retryTranscript)
+          : 0;
+
+        if (
+          retryTranscript &&
+          (retryConfidence > confidence ||
+              (containsMyanmarScript(retryTranscript) &&
+                  !containsMyanmarScript(recognizedTranscript)))
+        ) {
+          response = retryResponse;
+          recognizedTranscript = retryTranscript;
+          confidence = retryConfidence;
+        }
+      }
+
       return {
         transcript: recognizedTranscript,
         provider: "openai_whisper",
@@ -219,6 +319,7 @@ export class SpeechRecognitionService {
       logger.error("OpenAI Whisper transcription failed", {
         requestId: input.requestId,
         mimeType,
+        requestedLanguage: input.language,
         error: error instanceof Error ? error.message : String(error),
       });
 

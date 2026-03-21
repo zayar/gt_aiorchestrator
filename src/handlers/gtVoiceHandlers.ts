@@ -154,6 +154,8 @@ const analyzeInternal = async (req: RequestWithContext, _mode: "analyze" | "quer
   logger.info("Speech recognized", {
     requestId: request.requestId,
     provider: recognized.provider,
+    requestedLocale: request.locale,
+    requestedLanguage: request.language,
     languageCode: recognized.languageCode,
     confidence: recognized.confidence,
     lowConfidence: recognized.lowConfidence,
