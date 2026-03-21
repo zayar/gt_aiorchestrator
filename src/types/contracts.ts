@@ -225,6 +225,23 @@ export type AnalyzeAssistantResponse = {
   confirmRequired: boolean;
 };
 
+export type CatalogBootstrapResponse = {
+  clinic: GTCatalogSnapshot["clinic"];
+  services: GTService[];
+  products: GTProduct[];
+  practitioners: GTPractitioner[];
+  members: GTMember[];
+  serviceProductLinks: GTCatalogSnapshot["serviceProductLinks"];
+  loadedAt: string;
+  memberCount: number;
+};
+
+export type CatalogMembersResponse = {
+  query: string;
+  members: GTMember[];
+  loadedAt: string;
+};
+
 export type ConfirmActionRequest = {
   requestId: string;
   confirmation: boolean;

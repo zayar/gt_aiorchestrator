@@ -18,6 +18,7 @@ import { SaleOrchestrator } from "../services/SaleOrchestrator.js";
 import { ReportSummaryService } from "../services/ReportSummaryService.js";
 import { ClarificationService } from "../services/ClarificationService.js";
 import { AuditLogService } from "../services/AuditLogService.js";
+import { logger } from "../utils/logger.js";
 
 const apiCoreAdapter = new GTApiCoreAdapter();
 const reportAdapter = new GTReportAdapter(apiCoreAdapter);
@@ -57,6 +58,43 @@ type RequestWithAudio = RequestWithContext & {
   file?: Express.Multer.File;
 };
 
+const parseJsonField = (value: unknown): unknown => {
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  const raw = value.trim();
+  if (!raw) {
+    return undefined;
+  }
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return value;
+  }
+};
+
+const parseStringArrayField = (value: unknown): string[] | undefined => {
+  const parsed = parseJsonField(value);
+  if (Array.isArray(parsed)) {
+    const result = parsed.map((item) => String(item ?? "").trim()).filter(Boolean);
+    return result.length > 0 ? result : undefined;
+  }
+  if (typeof parsed === "string" && parsed.trim()) {
+    return [parsed.trim()];
+  }
+  return undefined;
+};
+
+const parseObjectField = (value: unknown): Record<string, unknown> | undefined => {
+  const parsed = parseJsonField(value);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return undefined;
+  }
+  return parsed as Record<string, unknown>;
+};
+
 const readAudioPayload = (req: RequestWithAudio): AudioPayload => {
   if (req.file?.buffer?.length) {
     return {
@@ -66,8 +104,9 @@ const readAudioPayload = (req: RequestWithAudio): AudioPayload => {
   }
 
   return {
-    base64: String(req.body?.audio?.base64 ?? "").trim() || undefined,
-    mimeType: String(req.body?.audio?.mimeType ?? "audio/m4a").trim() || "audio/m4a",
+    base64: String((parseObjectField(req.body?.audio)?.base64 as string | undefined) ?? "").trim() || undefined,
+    mimeType:
+      String((parseObjectField(req.body?.audio)?.mimeType as string | undefined) ?? "audio/m4a").trim() || "audio/m4a",
   };
 };
 
@@ -75,15 +114,13 @@ const buildAnalyzeRequest = (req: RequestWithContext): AnalyzeAssistantRequest =
   requestId: String(req.body?.requestId ?? req.requestId).trim(),
   clinicId: String(req.body?.clinicId ?? "").trim() || undefined,
   transcript: String(req.body?.transcript ?? "").trim() || undefined,
-  audio: req.body?.audio,
+  audio: parseObjectField(req.body?.audio) as AnalyzeAssistantRequest["audio"],
   locale: String(req.body?.locale ?? "").trim() || undefined,
   language: String(req.body?.language ?? "").trim() || undefined,
   timezone: String(req.body?.timezone ?? "").trim() || undefined,
-  userContext: req.body?.userContext,
-  selectedOptionIds: Array.isArray(req.body?.selectedOptionIds)
-    ? req.body.selectedOptionIds.map((value: unknown) => String(value))
-    : undefined,
-  metadata: typeof req.body?.metadata === "object" && req.body.metadata !== null ? req.body.metadata : undefined,
+  userContext: parseObjectField(req.body?.userContext) as AnalyzeAssistantRequest["userContext"],
+  selectedOptionIds: parseStringArrayField(req.body?.selectedOptionIds),
+  metadata: parseObjectField(req.body?.metadata),
 });
 
 const storePendingAction = (response: AnalyzeAssistantResponse) => {
@@ -113,6 +150,14 @@ const analyzeInternal = async (req: RequestWithContext, _mode: "analyze" | "quer
     audioBase64: audioPayload.base64,
     mimeType: audioPayload.mimeType,
     language: request.language ?? request.locale,
+  });
+  logger.info("Speech recognized", {
+    requestId: request.requestId,
+    provider: recognized.provider,
+    languageCode: recognized.languageCode,
+    confidence: recognized.confidence,
+    lowConfidence: recognized.lowConfidence,
+    transcriptPreview: recognized.transcript.slice(0, 160),
   });
 
   const routedIntent = await intentRouterService.classify(recognized.transcript, request);

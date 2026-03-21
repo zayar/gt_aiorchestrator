@@ -4,6 +4,7 @@ import { config } from "./config/index.js";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 import { requestContextMiddleware } from "./middleware/requestContext.js";
 import { gtActionRouter } from "./routes/gtAction.js";
+import { gtCatalogRouter } from "./routes/gtCatalog.js";
 import { gtHealthRouter } from "./routes/gtHealth.js";
 import { gtVoiceRouter } from "./routes/gtVoice.js";
 
@@ -24,6 +25,7 @@ export const createServer = () => {
   });
 
   app.use("/health", gtHealthRouter);
+  app.use("/api/gt/catalog", gtCatalogRouter);
   app.use("/api/gt/voice", gtVoiceRouter);
   app.use("/api/gt/action", gtActionRouter);
 
