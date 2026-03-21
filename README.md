@@ -9,7 +9,7 @@ GreatTime clinic Voice AI orchestrator for investor demo and future `VoiceConsul
 - Uses GreatTime bearer-token pass-through with optional refresh-token retry.
 - Grounds booking, sales, stock, and recommendation flows in real `gt.apicore` GraphQL data.
 - Keeps `gt.apicore` as the source of truth for operational validation and writes.
-- Supports production-ready audio transcription with OpenAI Whisper and transcript understanding with Gemini Flash when those providers are configured.
+- Supports production-ready Gemini-based audio transcription with live STT first and Vertex fallback, plus Gemini Flash intent understanding.
 
 ## Current First-Pass Scope
 
@@ -60,10 +60,10 @@ Service health check.
 
 ## Model Providers
 
-- `STT_PROVIDER=openai_whisper` enables direct audio-to-text transcription through OpenAI Whisper.
+- `STT_PROVIDER=vertex_gemini` enables Gemini live STT with a Vertex fallback model for reliable clinic transcription.
 - `LLM_PROVIDER=vertex_gemini` enables Gemini Flash intent classification and entity hint extraction.
 - If either provider is unavailable, the service falls back safely:
-  - transcript input still works without Whisper
+  - transcript input still works without live STT
   - deterministic regex routing still works without Gemini
 
 See [.env.example](/Users/zayarmin/Development/Cashflow%20Platform/ai-orchestrator-gt/.env.example) for the expected environment variables.
@@ -85,7 +85,7 @@ This lets the orchestrator recommend only real product items linked to real serv
 - Reschedule and cancel currently rely on generic booking update flows rather than a dedicated mutation with richer domain-side validation.
 - Seller-vs-practitioner performance reporting is split across different report resolvers and may need one clinic-facing summary resolver later.
 - Durable audit persistence and distributed idempotency storage are not yet implemented; first pass uses structured logs and in-memory TTL stores.
-- Real-time streaming transcription is still not wired; the current production path is upload-complete audio to Whisper, then structured intent classification with Gemini.
+- Real-time streaming UI is not wired yet; the current production path is upload-complete audio to Gemini live STT, then structured intent classification with Gemini.
 
 ## Development
 
@@ -115,6 +115,11 @@ Set these in GitHub at:
 - `GT_APICORE_URL`
 - `DEFAULT_TIMEZONE`
 - `STT_PROVIDER`
+- `VOICE_REALTIME_VERTEX_LOCATION`
+- `VOICE_REALTIME_MODEL`
+- `VOICE_RECOGNITION_FALLBACK_MODEL`
+- `VOICE_PRIMARY_LANGUAGE`
+- `VOICE_SECONDARY_LANGUAGE`
 - `LLM_PROVIDER`
 - `VERTEX_REGION`
 - `VERTEX_MODEL`
@@ -126,7 +131,7 @@ Suggested values for the current production target:
 - `ARTIFACT_REGISTRY_REPOSITORY=gt-aiorchestrator`
 - `GT_APICORE_URL=https://greattime-api-core-hs6rtohe3q-uc.a.run.app/apicore`
 - `DEFAULT_TIMEZONE=Asia/Yangon`
-- `STT_PROVIDER=openai_whisper`
+- `STT_PROVIDER=vertex_gemini`
 - `LLM_PROVIDER=vertex_gemini`
 - `VERTEX_REGION=us-central1`
 - `VERTEX_MODEL=gemini-2.5-flash`
@@ -143,12 +148,9 @@ Authentication to Google Cloud:
 
 App/runtime secrets:
 
-- `OPENAI_API_KEY`
+- optional only when testing Whisper again later: `OPENAI_API_KEY`
 - optional: `OPENAI_ORG_ID`
 - optional: `OPENAI_API_KEY_SECRET`
-
-If `OPENAI_API_KEY_SECRET` is set, the workflow will bind the Cloud Run env var from Secret Manager.
-If it is not set, the workflow will fall back to the plain `OPENAI_API_KEY` GitHub secret.
 
 ### One-Time GCP Setup
 

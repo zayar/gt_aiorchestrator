@@ -23,7 +23,7 @@ export const handleCatalogBootstrap = async (req: RequestWithContext, res: Respo
 
   const [catalog, members] = await Promise.all([
     catalogService.getCatalog(session),
-    apiCoreAdapter.searchMembers(session, ""),
+    catalogService.getMemberReferenceList(session, memberLimit),
   ]);
 
   const response: CatalogBootstrapResponse = {
@@ -31,7 +31,7 @@ export const handleCatalogBootstrap = async (req: RequestWithContext, res: Respo
     services: catalog.services,
     products: catalog.products,
     practitioners: catalog.practitioners,
-    members: members.slice(0, memberLimit),
+    members,
     serviceProductLinks: catalog.serviceProductLinks,
     loadedAt: new Date().toISOString(),
     memberCount: members.length,

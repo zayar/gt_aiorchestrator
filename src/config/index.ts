@@ -77,12 +77,27 @@ export const config = {
   previewCacheTtlMs: getPositiveNumberEnv("GT_PREVIEW_CACHE_TTL_MS", 15 * 60 * 1000),
   idempotencyTtlMs: getPositiveNumberEnv("GT_IDEMPOTENCY_TTL_MS", 60 * 60 * 1000),
   defaultTimezone: getStringEnv("DEFAULT_TIMEZONE", "Asia/Yangon"),
-  sttProvider: normalizeProvider(String(process.env.STT_PROVIDER ?? "stub"), ["stub", "openai_whisper"], "stub"),
+  sttProvider: normalizeProvider(
+    String(process.env.STT_PROVIDER ?? "vertex_gemini"),
+    ["stub", "openai_whisper", "vertex_gemini"],
+    "vertex_gemini",
+  ),
   openAiApiKey: String(process.env.OPENAI_API_KEY ?? "").trim(),
   openAiOrganization: String(process.env.OPENAI_ORG_ID ?? "").trim(),
   openAiSttModel: getStringEnv("OPENAI_STT_MODEL", "whisper-1"),
   sttTimeoutMs: getPositiveNumberEnv("STT_TIMEOUT_MS", 20000),
   sttLowConfidenceThreshold: getUnitIntervalEnv("STT_LOW_CONFIDENCE_THRESHOLD", 0.68),
+  voiceRealtimeVertexLocation: getStringEnv("VOICE_REALTIME_VERTEX_LOCATION", "global"),
+  voiceRealtimeModel: getStringEnv(
+    "VOICE_REALTIME_MODEL",
+    "gemini-2.0-flash-live-preview-04-09",
+  ),
+  voiceRecognitionFallbackModel: getStringEnv(
+    "VOICE_RECOGNITION_FALLBACK_MODEL",
+    process.env.VERTEX_MODEL ?? "gemini-2.5-flash",
+  ),
+  voicePrimaryLanguage: getStringEnv("VOICE_PRIMARY_LANGUAGE", "my-MM"),
+  voiceSecondaryLanguage: getStringEnv("VOICE_SECONDARY_LANGUAGE", "en-US"),
   llmProvider: normalizeProvider(
     String(process.env.LLM_PROVIDER ?? "heuristic"),
     ["heuristic", "vertex_gemini"],

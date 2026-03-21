@@ -49,6 +49,32 @@ const auditLogService = new AuditLogService();
 
 export const pendingActionStore = new TTLCache<PendingActionRecord>(config.previewCacheTtlMs);
 
+const SPEECH_BIAS_LIMIT = 1200;
+const MEMBER_REFERENCE_LIMIT = 120;
+const DEFAULT_SPEECH_BIAS_PHRASES = [
+  "booking",
+  "appointment",
+  "reschedule",
+  "cancel booking",
+  "availability",
+  "consultation",
+  "service",
+  "product",
+  "sale",
+  "report",
+  "stock",
+  "doctor",
+  "practitioner",
+  "member",
+  "client",
+  "patient",
+  "ရက်ချိန်း",
+  "ဘိုကင်",
+  "ဝန်ဆောင်မှု",
+  "ကုန်ပစ္စည်း",
+  "ဒေါက်တာ",
+];
+
 type AudioPayload = {
   base64?: string;
   mimeType?: string;
@@ -123,6 +149,41 @@ const buildAnalyzeRequest = (req: RequestWithContext): AnalyzeAssistantRequest =
   metadata: parseObjectField(req.body?.metadata),
 });
 
+const buildSpeechBiasPhrases = async (session: ReturnType<SessionContextService["fromRequest"]>): Promise<string[]> => {
+  const [catalog, members] = await Promise.all([
+    catalogService.getCatalog(session),
+    catalogService.getMemberReferenceList(session, MEMBER_REFERENCE_LIMIT),
+  ]);
+
+  const seen = new Set<string>();
+  const phrases: string[] = [];
+
+  const push = (value: unknown) => {
+    const phrase = String(value ?? "").trim();
+    if (!phrase) {
+      return;
+    }
+    const key = phrase.toLowerCase();
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    phrases.push(phrase);
+  };
+
+  push(catalog.clinic.name);
+  DEFAULT_SPEECH_BIAS_PHRASES.forEach(push);
+  catalog.services.forEach((item) => push(item.name));
+  catalog.products.forEach((item) => {
+    push(item.name);
+    push(item.stockItem?.name);
+  });
+  catalog.practitioners.forEach((item) => push(item.name));
+  members.forEach((item) => push(item.name));
+
+  return phrases.slice(0, SPEECH_BIAS_LIMIT);
+};
+
 const storePendingAction = (response: AnalyzeAssistantResponse) => {
   if (!response.proposedAction || !response.confirmRequired) {
     return;
@@ -144,18 +205,33 @@ const analyzeInternal = async (req: RequestWithContext, _mode: "analyze" | "quer
   const request = buildAnalyzeRequest(req);
   const session = sessionContextService.fromRequest(req);
   const audioPayload = readAudioPayload(req as RequestWithAudio);
+  let biasPhrases: string[] = [];
+
+  try {
+    biasPhrases = await buildSpeechBiasPhrases(session);
+  } catch (error) {
+    logger.warn("Speech bias phrase preparation failed", {
+      requestId: request.requestId,
+      clinicId: session.clinicId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
   const recognized = await speechRecognitionService.recognize({
     requestId: request.requestId,
     transcript: request.transcript,
     audioBase64: audioPayload.base64,
     mimeType: audioPayload.mimeType,
     language: request.language ?? request.locale,
+    additionalLanguageCodes: [config.voiceSecondaryLanguage],
+    biasPhrases,
   });
   logger.info("Speech recognized", {
     requestId: request.requestId,
     provider: recognized.provider,
     requestedLocale: request.locale,
     requestedLanguage: request.language,
+    biasPhraseCount: biasPhrases.length,
     languageCode: recognized.languageCode,
     confidence: recognized.confidence,
     lowConfidence: recognized.lowConfidence,

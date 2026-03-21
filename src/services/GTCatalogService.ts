@@ -1,12 +1,13 @@
 import { config } from "../config/index.js";
 import { GTApiCoreAdapter } from "../adapters/GTApiCoreAdapter.js";
-import type { GTCatalogSnapshot } from "../types/domain.js";
+import type { GTCatalogSnapshot, GTMember } from "../types/domain.js";
 import type { GTSessionContext } from "../types/session.js";
 import { TTLCache } from "../utils/cache.js";
 import { logger } from "../utils/logger.js";
 
 export class GTCatalogService {
   private readonly cache = new TTLCache<GTCatalogSnapshot>(config.catalogCacheTtlMs);
+  private readonly memberReferenceCache = new TTLCache<GTMember[]>(config.catalogCacheTtlMs);
 
   constructor(private readonly apiCoreAdapter: GTApiCoreAdapter) {}
 
@@ -45,5 +46,25 @@ export class GTCatalogService {
     });
 
     return snapshot;
+  }
+
+  async getMemberReferenceList(session: GTSessionContext, limit = 120): Promise<GTMember[]> {
+    const cacheKey = `${session.clinicId}:members`;
+    const cached = this.memberReferenceCache.get(cacheKey);
+    if (cached) {
+      return cached.slice(0, Math.max(1, limit));
+    }
+
+    const members = await this.apiCoreAdapter.searchMembers(session, "");
+    const cachedMembers = members.slice(0, Math.max(limit, 180));
+    this.memberReferenceCache.set(cacheKey, cachedMembers);
+
+    logger.info("GT member reference list prepared", {
+      requestId: session.requestId,
+      clinicId: session.clinicId,
+      memberCount: cachedMembers.length,
+    });
+
+    return cachedMembers.slice(0, Math.max(1, limit));
   }
 }
