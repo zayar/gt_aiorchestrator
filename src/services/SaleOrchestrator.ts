@@ -2,6 +2,7 @@ import type {
   AnalyzeAssistantRequest,
   AnalyzeAssistantResponse,
   AssistantWarning,
+  CandidateOption,
   ConfirmActionResponse,
   PendingActionRecord,
 } from "../types/contracts.js";
@@ -144,7 +145,17 @@ export class SaleOrchestrator {
 
     const segments = parseLineItemPhrases(params.transcript);
     const lineItems: GTSaleDraftLineItem[] = [];
+    const candidateOptions = new Map<string, CandidateOption>();
     let primaryServiceName: string | undefined;
+
+    const rememberOptions = (options: CandidateOption[]) => {
+      for (const option of options) {
+        const key = `${option.type}:${option.id}`;
+        if (!candidateOptions.has(key)) {
+          candidateOptions.set(key, option);
+        }
+      }
+    };
 
     for (const segment of segments) {
       const quantity = parseQuantity(segment);
@@ -167,6 +178,7 @@ export class SaleOrchestrator {
         });
         continue;
       }
+      rememberOptions(serviceResolution.options);
 
       const productResolution = this.entityResolutionService.resolveProduct(normalizedSegment, catalog);
       if (productResolution.state === "resolved") {
@@ -187,6 +199,7 @@ export class SaleOrchestrator {
         });
         continue;
       }
+      rememberOptions(productResolution.options);
 
       warnings.push({
         code: "unmatched_line_item",
@@ -198,6 +211,7 @@ export class SaleOrchestrator {
       const clarification = this.clarificationService.missingField(
         "Please choose at least one service or product line item.",
         ["line_items"],
+        Array.from(candidateOptions.values()).slice(0, 8),
       );
       return {
         requestId: params.requestId,

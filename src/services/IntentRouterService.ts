@@ -10,12 +10,12 @@ const extractWithRegex = (text: string, pattern: RegExp): string | undefined => 
 
 const cleanTrailingBookingWords = (value: string | undefined): string | undefined =>
   String(value ?? "")
-    .replace(/\b(appointment|book|booking|service|slot)\b/gi, " ")
+    .replace(/\b(appointment|book|booking|service|slot|create|sale)\b/gi, " ")
     .replace(/\s+/g, " ")
     .trim() || undefined;
 
 const extractMyanmarMemberHint = (text: string): string | undefined => {
-  const parts = text.split(/\s+ကို\b/);
+  const parts = text.split(/\s+ကို/);
   if (parts.length < 2) {
     return undefined;
   }
@@ -41,18 +41,70 @@ const extractMyanmarMemberHint = (text: string): string | undefined => {
   return tokens.slice(-3).join(" ").trim() || undefined;
 };
 
+const extractMyanmarMemberHintFromAhtwet = (text: string): string | undefined => {
+  const parts = text.split(/\s+အတွက်/);
+  if (parts.length < 2) {
+    return undefined;
+  }
+
+  const left = String(parts[0] ?? "")
+    .replace(
+      /\b(today|tomorrow)\b|ဒီနေ့|ဒီေန႔|မနက်ဖြန်|မနက္ျဖန္|မနက်ဖန်|မနက္ဖန္|\d{1,2}|[၀-၉]{1,2}|နာရီ|မှာ|တြင္|တွင်/gi,
+      " ",
+    )
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!left) {
+    return undefined;
+  }
+
+  const tokens = left.split(/\s+/).filter(Boolean);
+  return tokens.slice(-3).join(" ").trim() || undefined;
+};
+
+const extractMyanmarServiceHint = (text: string): string | undefined =>
+  cleanTrailingBookingWords(
+    extractWithRegex(
+      text,
+      /\sအတွက်\s+([a-z][a-z0-9 &+/'().-]{2,}?)\s+(?:appointment|booking|book)\b/i,
+    ) ||
+      extractWithRegex(
+        text,
+        /\sကို\s+([a-z][a-z0-9 &+/'().-]{2,}?)\s+(?:appointment|booking|book)\b/i,
+      ) ||
+      extractWithRegex(
+        text,
+        /([a-z][a-z0-9 &+/'().-]{2,}?)\s+(?:appointment|booking|book)\b/i,
+      ),
+  );
+
+const extractEnglishBookingServiceHint = (text: string): string | undefined =>
+  cleanTrailingBookingWords(
+    extractWithRegex(text, /\sfor\s+([a-z][a-z0-9 &+/'().-]{2,}?)\s+(?:appointment|booking)\b/i) ||
+      extractWithRegex(text, /\sfor\s+([a-z][a-z0-9 &+/'().-]{2,}?)\s+with\b/i) ||
+      extractWithRegex(text, /([a-z][a-z0-9 &+/'().-]{2,}?)\s+(?:appointment|booking)\b/i),
+  );
+
 const extractServiceHint = (text: string): string | undefined =>
   cleanTrailingBookingWords(
+    extractMyanmarServiceHint(text) ||
+      extractEnglishBookingServiceHint(text) ||
     extractWithRegex(
       text,
       /\b(?:book|find|schedule|recommend products for|what products go with|create sale for)\s+([^,]+?)(?:\s+(?:for|with|today|tomorrow|at|this|on)\b|$)/i,
     ) ||
       extractWithRegex(text, /\b(?:add|quote)\s+([^,]+)$/i) ||
-      extractWithRegex(text, /([a-z][a-z0-9 &+/'().-]{2,}?)\s+appointment\b/i) ||
-      extractWithRegex(text, /\sကို\s+([a-z][a-z0-9 &+/'().-]{2,}?)\s+appointment\b/i),
+      extractWithRegex(text, /\sကို\s+([a-z][a-z0-9 &+/'().-]{2,}?)\s+(?:appointment|booking)\b/i),
   );
 
 const extractTimeHint = (text: string): string | undefined => {
+  const hasDateCue =
+    /\b(today|tomorrow|this evening|this morning|this afternoon|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(
+      text,
+    ) ||
+    /(ဒီနေ့|ဒီေန႔|မနက်ဖြန်|မနက္ျဖန္|မနက်ဖန်|မနက္ဖန္|တနင်္လာ|တနလၤာ|အင်္ဂါ|အဂၤါ|ဗုဒ္ဓဟူး|ဗုဒၶဟူး|ကြာသပတေး|ၾကာသပေတး|သောကြာ|ေသာၾကာ|စနေ|စေန|တနင်္ဂနွေ|တနဂၤေႏြ)/i.test(
+      text,
+    );
   const match = text.match(
     /\b(?:today|tomorrow|this evening|this morning|this afternoon|monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?:\s+(?:morning|afternoon|evening|night))?(?:\s+at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?)?/i,
   );
@@ -72,7 +124,7 @@ const extractTimeHint = (text: string): string | undefined => {
     return myanmarTimeOnly[0].trim();
   }
 
-  const timeOnly = text.match(/\b\d{1,2}(?::\d{2})?\s*(am|pm)?\b/i);
+  const timeOnly = hasDateCue ? text.match(/\b\d{1,2}(?::\d{2})?\s*(am|pm)?\b/i) : text.match(/\bat\s+\d{1,2}(?::\d{2})?\s*(am|pm)\b/i);
   return timeOnly?.[0]?.trim() || undefined;
 };
 
@@ -81,6 +133,12 @@ export class IntentRouterService {
 
   async classify(transcript: string, _request: AnalyzeAssistantRequest): Promise<IntentResult> {
     const normalized = transcript.toLowerCase();
+    const hasBookingCue = /\b(book|booking|appointment|schedule appointment|new appointment)\b|appointment book|ရက်ချိန်း|ဘိုကင်/.test(
+      normalized,
+    );
+    const hasSaleCue = /\b(add|create sale|sale for|consultation plus|aftercare set|sell)\b|ရောင်း|ေရာင္း/.test(
+      normalized,
+    );
 
     let intent: AssistantIntent = "unknown";
     let confidence = 0.35;
@@ -94,7 +152,7 @@ export class IntentRouterService {
     } else if (/\b(free slot|availability|available slot|find a free slot)\b|အားလပ်ချိန်|အားလပ် slot/.test(normalized)) {
       intent = "booking.availability_check";
       confidence = 0.88;
-    } else if (/\b(book|schedule appointment|new appointment)\b|appointment book|ရက်ချိန်း|ဘိုကင်/.test(normalized)) {
+    } else if (hasBookingCue) {
       intent = "booking.create";
       confidence = 0.9;
     } else if (/\b(recommend|go with|related to this service|related products|included or related)\b/.test(normalized)) {
@@ -115,7 +173,7 @@ export class IntentRouterService {
     } else if (/\b(quote)\b/.test(normalized)) {
       intent = "sale.quote";
       confidence = 0.78;
-    } else if (/\b(add|create sale|sale for|consultation plus|aftercare set)\b/.test(normalized)) {
+    } else if (hasSaleCue && !hasBookingCue) {
       intent = "sale.create";
       confidence = 0.8;
     }
@@ -123,7 +181,8 @@ export class IntentRouterService {
     const regexHints = {
       memberName:
         extractWithRegex(transcript, /\bfor\s+([^,]+?)(?:\s+(?:today|tomorrow|with|at|this|on)\b|$)/i) ||
-        extractMyanmarMemberHint(transcript),
+        extractMyanmarMemberHint(transcript) ||
+        extractMyanmarMemberHintFromAhtwet(transcript),
       practitionerName: extractWithRegex(transcript, /\bwith\s+([^,]+?)(?:\s+(?:today|tomorrow|at|this|on)\b|$)/i),
       bookingId: extractWithRegex(transcript, /\bbooking\s+#?([a-z0-9_-]{6,})\b/i),
       timeText: extractTimeHint(transcript),

@@ -239,6 +239,13 @@ const analyzeInternal = async (req: RequestWithContext, _mode: "analyze" | "quer
   });
 
   const routedIntent = await intentRouterService.classify(recognized.transcript, request);
+  logger.info("Intent routed", {
+    requestId: request.requestId,
+    transcript: recognized.transcript,
+    intent: routedIntent.intent,
+    confidence: routedIntent.confidence,
+    rawHints: routedIntent.rawHints,
+  });
   let response: AnalyzeAssistantResponse;
 
   switch (routedIntent.intent) {
